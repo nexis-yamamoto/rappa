@@ -1,11 +1,13 @@
 """
 rappa - ABC記法のテキストを再生するプログラム
+MIDI再生にも対応
 """
 
 import pygame
 import re
 import sys
 from typing import List, Tuple
+from pathlib import Path
 
 # 音符の長さ（ミリ秒）
 BASE_DURATION = 500  # 四分音符の長さ
@@ -34,6 +36,83 @@ class ABCPlayer:
         """
         pygame.mixer.init(frequency=sample_rate, size=-16, channels=1, buffer=512)
         self.sample_rate = sample_rate
+    
+    def midi_note_to_frequency(self, note_number: int) -> float:
+        """
+        MIDIノート番号を周波数に変換
+        
+        Args:
+            note_number: MIDIノート番号 (0-127, A4=69=440Hz)
+            
+        Returns:
+            周波数(Hz)
+        """
+        return 440.0 * (2 ** ((note_number - 69) / 12))
+    
+    def play_midi(self, midi_path: str):
+        """
+        MIDIファイルを再生
+        
+        Args:
+            midi_path: MIDIファイルのパス
+        """
+        try:
+            import mido
+        except ImportError:
+            print("エラー: midoライブラリがインストールされていません")
+            print("インストール: pip install mido または uv add mido")
+            return
+        
+        try:
+            mid = mido.MidiFile(midi_path)
+        except Exception as e:
+            print(f"MIDIファイルの読み込みエラー: {e}")
+            return
+        
+        print(f"MIDI再生中: {midi_path}")
+        print(f"トラック数: {len(mid.tracks)}")
+        print(f"ティック/ビート: {mid.ticks_per_beat}")
+        print(f"総時間: {mid.length:.2f}秒\n")
+        
+        # 現在再生中のノート情報を管理
+        active_notes = {}
+        
+        for i, track in enumerate(mid.tracks):
+            print(f"トラック {i}: {track.name}")
+        
+        print("\n再生開始...")
+        
+        # MIDIメッセージを順次処理
+        for msg in mid.play():
+            if msg.type == 'note_on' and msg.velocity > 0:
+                # ノートオン
+                frequency = self.midi_note_to_frequency(msg.note)
+                # デフォルトの長さを設定（実際の長さはnote_offで決まる）
+                duration = 500  # 仮の長さ
+                
+                sound = self.generate_tone(frequency, duration)
+                channel = sound.play()
+                
+                # アクティブなノートとして記録
+                active_notes[msg.note] = {
+                    'frequency': frequency,
+                    'channel': channel,
+                    'sound': sound
+                }
+                
+                print(f"  ノートオン: {msg.note} ({frequency:.2f}Hz) vel={msg.velocity}")
+                
+            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                # ノートオフ
+                if msg.note in active_notes:
+                    # サウンドを停止
+                    channel = active_notes[msg.note]['channel']
+                    if channel:
+                        channel.stop()
+                    del active_notes[msg.note]
+                    print(f"  ノートオフ: {msg.note}")
+        
+        print("\n再生完了")
         
     def parse_note(self, note_str: str) -> Tuple[float, int]:
         """
@@ -132,13 +211,98 @@ class ABCPlayer:
         
         return pygame.mixer.Sound(stereo_samples)
     
-    def play(self, abc_notation: str):
+    def frequency_to_midi_note(self, frequency: float) -> int:
+        """
+        周波数をMIDIノート番号に変換
+        
+        Args:
+            frequency: 周波数(Hz)
+            
+        Returns:
+            MIDIノート番号 (0-127)
+        """
+        if frequency == 0:
+            return 0
+        import math
+        # A4=440Hz=MIDIノート69
+        note_number = round(69 + 12 * math.log2(frequency / 440.0))
+        return max(0, min(127, note_number))  # 0-127に制限
+    
+    def save_to_midi(self, abc_notation: str, output_path: str, tempo: int = 120):
+        """
+        ABC記法の文字列をMIDIファイルとして保存
+        
+        Args:
+            abc_notation: ABC記法の文字列
+            output_path: 出力MIDIファイルのパス
+            tempo: テンポ (BPM, デフォルト120)
+        """
+        try:
+            import mido
+            from mido import Message, MidiFile, MidiTrack, MetaMessage
+        except ImportError:
+            print("エラー: midoライブラリがインストールされていません")
+            print("インストール: pip install mido または uv add mido")
+            return
+        
+        # 新しいMIDIファイルとトラックを作成
+        mid = MidiFile()
+        track = MidiTrack()
+        mid.tracks.append(track)
+        
+        # トラック名とテンポを設定
+        track.append(MetaMessage('track_name', name='rappa ABC', time=0))
+        track.append(MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo), time=0))
+        
+        # スペースで分割して各音符を取得
+        notes = abc_notation.split()
+        
+        print(f"MIDI保存中: {output_path}")
+        print(f"テンポ: {tempo} BPM")
+        
+        for note_str in notes:
+            frequency, duration = self.parse_note(note_str)
+            
+            # ミリ秒をMIDIティックに変換 (480 ticks per beat)
+            ticks_per_beat = 480
+            beats_per_second = tempo / 60.0
+            ticks_per_second = ticks_per_beat * beats_per_second
+            ticks = int((duration / 1000.0) * ticks_per_second)
+            
+            if frequency > 0:
+                # 音符
+                midi_note = self.frequency_to_midi_note(frequency)
+                velocity = 64  # 中程度の音量
+                
+                # ノートオン
+                track.append(Message('note_on', note=midi_note, velocity=velocity, time=0))
+                # ノートオフ
+                track.append(Message('note_off', note=midi_note, velocity=velocity, time=ticks))
+                
+                print(f"  音符: {note_str} -> MIDI note {midi_note}, {duration}ms")
+            else:
+                # 休符 (単に時間を進める)
+                if len(track) > 0:
+                    # 最後のメッセージの時間を延長
+                    track[-1].time += ticks
+                print(f"  休符: {note_str} -> {duration}ms")
+        
+        # ファイルに保存
+        mid.save(output_path)
+        print(f"\nMIDIファイル保存完了: {output_path}")
+    
+    def play(self, abc_notation: str, save_midi: str = None):
         """
         ABC記法の文字列を再生
         
         Args:
             abc_notation: ABC記法の文字列(例: "C D E F G A B c")
+            save_midi: MIDIファイルとして保存する場合のパス (省略可)
         """
+        # MIDI保存が指定されている場合
+        if save_midi:
+            self.save_to_midi(abc_notation, save_midi)
+        
         # スペースで分割して各音符を取得
         notes = abc_notation.split()
         
@@ -164,22 +328,58 @@ class ABCPlayer:
 def main():
     """メイン関数"""
     if len(sys.argv) < 2:
-        print("使用法: python rappa.py <ABC記法の文字列>")
-        print("例: python rappa.py \"C D E F G A B c\"")
-        print("例: python rappa.py \"C2 D2 E2 F2 G2 A2 B2 c2\"")
-        print("例: python rappa.py \"C D E z E F G z\"")
-        print("例: python rappa.py \"C ^C D _E E\"  # 臨時記号付き")
+        print("使用法: python rappa.py <ABC記法の文字列 または MIDIファイルパス> [オプション]")
+        print("\nABC記法の例:")
+        print("  python rappa.py \"C D E F G A B c\"")
+        print("  python rappa.py \"C2 D2 E2 F2 G2 A2 B2 c2\"")
+        print("  python rappa.py \"C D E z E F G z\"")
+        print("  python rappa.py \"C ^C D _E E\"  # 臨時記号付き")
+        print("\nMIDI再生の例:")
+        print("  python rappa.py song.mid")
+        print("  python rappa.py path/to/music.midi")
+        print("\nMIDI保存の例:")
+        print("  python rappa.py \"C D E F G A B c\" --save output.mid")
+        print("  python rappa.py \"C _E F G\" -s blues.mid")
         sys.exit(1)
     
-    abc_notation = ' '.join(sys.argv[1:])
+    # コマンドライン引数を解析
+    args = sys.argv[1:]
+    save_midi_path = None
+    input_parts = []
+    
+    i = 0
+    while i < len(args):
+        if args[i] in ['--save', '-s']:
+            if i + 1 < len(args):
+                save_midi_path = args[i + 1]
+                i += 2
+            else:
+                print("エラー: --save オプションには出力ファイル名が必要です")
+                sys.exit(1)
+        else:
+            input_parts.append(args[i])
+            i += 1
+    
+    input_str = ' '.join(input_parts)
     
     try:
         player = ABCPlayer()
-        player.play(abc_notation)
+        
+        # 入力がファイルパスかどうかをチェック
+        input_path = Path(input_str)
+        if input_path.exists() and input_path.suffix.lower() in ['.mid', '.midi']:
+            # MIDIファイルとして再生
+            player.play_midi(str(input_path))
+        else:
+            # ABC記法として再生（MIDI保存オプション付き）
+            player.play(input_str, save_midi=save_midi_path)
+            
     except KeyboardInterrupt:
         print("\n中断されました")
     except Exception as e:
         print(f"エラー: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
