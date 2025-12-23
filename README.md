@@ -2,7 +2,15 @@
 
 ABC記法のテキストを再生するpythonプログラム
 
-再生手段はpygameを使う。MIDI再生・保存にも対応。
+MIDI出力ポートを使用して再生します。OS上のMIDI出力デバイス（仮想MIDIドライバ、DAW、ハードウェア音源など）が必要です。
+
+## 前提条件
+
+- Python 3.10以上
+- MIDI出力デバイス（仮想MIDIドライバまたはDAW）が利用可能であること
+  - **Windows**: loopMIDI、virtualMIDI、またはDAWの仮想ポート
+  - **macOS**: IAC Driver または DAWの仮想ポート
+  - **Linux**: ALSA MIDIデバイス または FluidSynth
 
 ## 通常の使用方法
 
@@ -62,7 +70,7 @@ cd rappa
 2. **uvを使う場合（推奨）**:
 ```bash
 # 依存関係をインストール
-uv add mcp pygame numpy mido python-ly
+uv add mcp mido python-rtmidi python-ly
 
 # 動作確認
 uv run rappa_mcp_server.py
@@ -161,22 +169,34 @@ uv run rappa_mcp_server.py
   - `_`: フラット（半音下げる） 例: `_B`はB♭
   - `=`: ナチュラル（臨時記号を打ち消す） 例: `=A`
 
-## MIDI機能について
+## MIDI再生について
 
-rappaは[mido](https://github.com/mido/mido)ライブラリを使ってMIDI再生・保存機能を提供します。LilyPond入力も一度MIDIに変換してから同じシンセパイプラインで再生します。
+rappaは[mido](https://github.com/mido/mido)と[python-rtmidi](https://github.com/SpotlightKid/python-rtmidi)ライブラリを使ってMIDI出力ポート経由で再生します。LilyPond入力も一度MIDIに変換してから再生します。
 
 ### 主な機能
 
-1. **MIDIファイルの再生**: 既存のMIDIファイルを読み込んで、rappaの音声エンジンで演奏
+1. **MIDIファイルの再生**: 既存のMIDIファイルをMIDI出力ポートに送信して演奏
 2. **MIDI保存**: ABC記法で作曲した音楽をMIDIファイルとして保存
+
+### 必要なMIDI出力デバイス
+
+rappaは音を鳴らすために、システムにMIDI出力ポートが必要です。MIDI出力ポートがない場合はエラーが表示されます。
+
+#### 仮想MIDIドライバのセットアップ
+
+- **Windows**: [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)をインストール
+- **macOS**: システム設定 > MIDI設定 > IAC Driverを有効化
+- **Linux**: FluidSynthをインストール（`sudo apt install fluidsynth`）
+
+または、DAW（Digital Audio Workstation）の仮想MIDI入力を使用することもできます。
 
 ### 技術的な詳細
 
 - **MIDIパース**: `mido`ライブラリでMIDIイベントを解析
+- **MIDI出力**: `python-rtmidi`を使用してOSのMIDI出力ポートに送信
 - **周波数変換**: MIDIノート番号 ⇔ 周波数の相互変換
   - A4 (440Hz) = MIDIノート番号69を基準
   - 12平均律: `freq = 440 * 2^((note-69)/12)`
-- **音声生成**: pygameとnumpyで正弦波を生成して再生
 
 ### 使用例
 

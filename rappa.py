@@ -1,12 +1,11 @@
 """
 rappa - ABC記法のテキストを再生するプログラム
-MIDI再生にも対応
+MIDI出力ポートを使用したMIDI再生に対応
 """
 
-import pygame
 import re
 import sys
-from typing import List, Tuple
+from typing import Tuple
 from pathlib import Path
 from lilypond_converter import convert_lilypond_to_midi_path
 
@@ -26,6 +25,11 @@ SEMITONE_RATIO = 2 ** (1/12)
 LILYPOND_MARKERS = ["\\relative", "\\version", "\\score", "\\new", "\\tempo", "\\time", "\\key"]
 
 
+class MIDIPortError(Exception):
+    """MIDI出力ポートが利用できない場合のエラー"""
+    pass
+
+
 def looks_like_lilypond(text: str) -> bool:
     """LilyPondらしいテキストか簡易判定する。"""
     stripped = text.strip()
@@ -33,17 +37,88 @@ def looks_like_lilypond(text: str) -> bool:
 
 
 class ABCPlayer:
-    """ABC記法を解析して音楽を再生するクラス"""
+    """ABC記法を解析して音楽を再生するクラス（MIDI出力ポート経由）"""
     
-    def __init__(self, sample_rate: int = 22050):
+    def __init__(self, show_progress: bool = True):
         """
         初期化
         
         Args:
-            sample_rate: サンプリングレート
+            show_progress: 進行状況を表示するかどうか（CLI: True, MCP: False）
         """
-        pygame.mixer.init(frequency=sample_rate, size=-16, channels=1, buffer=512)
-        self.sample_rate = sample_rate
+        self.show_progress = show_progress
+        self._port = None
+    
+    def _get_midi_output_port(self):
+        """
+        MIDI出力ポートを取得
+        
+        Returns:
+            mido.ports.BaseOutput: MIDI出力ポート
+            
+        Raises:
+            MIDIPortError: MIDI出力ポートが利用できない場合
+        """
+        # Check if cached port is still valid
+        if self._port is not None:
+            if not self._port.closed:
+                return self._port
+            # Port was closed, clear the cache
+            self._port = None
+            
+        try:
+            import mido
+            import rtmidi
+        except ImportError as e:
+            raise MIDIPortError(
+                "エラー: mido または python-rtmidi がインストールされていません\n"
+                "インストール: pip install mido python-rtmidi または uv add mido python-rtmidi"
+            ) from e
+        
+        # Only set backend if not already configured to rtmidi
+        try:
+            current_backend = mido.backend
+            if current_backend is None or 'rtmidi' not in current_backend.name:
+                mido.set_backend('mido.backends.rtmidi')
+        except Exception:
+            # If we can't check the backend, set it anyway
+            mido.set_backend('mido.backends.rtmidi')
+        
+        # 利用可能なMIDI出力ポートを取得
+        try:
+            output_names = mido.get_output_names()
+        except Exception as e:
+            raise MIDIPortError(
+                "エラー: MIDIシステムの初期化に失敗しました\n"
+                f"詳細: {e}\n"
+                "MIDI出力デバイス（仮想MIDIドライバやDAW）を起動してください"
+            ) from e
+        
+        if not output_names:
+            raise MIDIPortError(
+                "エラー: 利用可能なMIDI出力ポートがありません\n"
+                "MIDI出力デバイス（仮想MIDIドライバやDAW）を起動してください"
+            )
+        
+        # 最初の利用可能なポートを使用
+        port_name = output_names[0]
+        if self.show_progress:
+            print(f"MIDI出力ポート: {port_name}")
+        
+        try:
+            self._port = mido.open_output(port_name)
+        except Exception as e:
+            raise MIDIPortError(
+                f"エラー: MIDI出力ポート '{port_name}' を開けませんでした\n"
+                f"詳細: {e}"
+            ) from e
+        return self._port
+    
+    def close(self):
+        """MIDIポートを閉じる"""
+        if self._port is not None:
+            self._port.close()
+            self._port = None
     
     def midi_note_to_frequency(self, note_number: int) -> float:
         """
@@ -59,7 +134,7 @@ class ABCPlayer:
     
     def play_midi(self, midi_path: str):
         """
-        MIDIファイルを再生
+        MIDIファイルをMIDI出力ポート経由で再生
         
         Args:
             midi_path: MIDIファイルのパス
@@ -67,9 +142,10 @@ class ABCPlayer:
         try:
             import mido
         except ImportError:
-            print("エラー: midoライブラリがインストールされていません")
-            print("インストール: pip install mido または uv add mido")
-            return
+            raise MIDIPortError(
+                "エラー: midoライブラリがインストールされていません\n"
+                "インストール: pip install mido python-rtmidi または uv add mido python-rtmidi"
+            )
         
         try:
             mid = mido.MidiFile(midi_path)
@@ -77,50 +153,34 @@ class ABCPlayer:
             print(f"MIDIファイルの読み込みエラー: {e}")
             return
         
-        print(f"MIDI再生中: {midi_path}")
-        print(f"トラック数: {len(mid.tracks)}")
-        print(f"ティック/ビート: {mid.ticks_per_beat}")
-        print(f"総時間: {mid.length:.2f}秒\n")
+        # MIDI出力ポートを取得
+        port = self._get_midi_output_port()
         
-        # 現在再生中のノート情報を管理
-        active_notes = {}
+        if self.show_progress:
+            print(f"MIDI再生中: {midi_path}")
+            print(f"トラック数: {len(mid.tracks)}")
+            print(f"ティック/ビート: {mid.ticks_per_beat}")
+            print(f"総時間: {mid.length:.2f}秒\n")
+            
+            for i, track in enumerate(mid.tracks):
+                print(f"トラック {i}: {track.name}")
+            
+            print("\n再生開始...")
         
-        for i, track in enumerate(mid.tracks):
-            print(f"トラック {i}: {track.name}")
-        
-        print("\n再生開始...")
-        
-        # MIDIメッセージを順次処理
+        # MIDIメッセージを順次処理して送信
         for msg in mid.play():
-            if msg.type == 'note_on' and msg.velocity > 0:
-                # ノートオン
-                frequency = self.midi_note_to_frequency(msg.note)
-                # デフォルトの長さを設定（実際の長さはnote_offで決まる）
-                duration = 500  # 仮の長さ
+            if not msg.is_meta:
+                port.send(msg)
                 
-                sound = self.generate_tone(frequency, duration)
-                channel = sound.play()
-                
-                # アクティブなノートとして記録
-                active_notes[msg.note] = {
-                    'frequency': frequency,
-                    'channel': channel,
-                    'sound': sound
-                }
-                
-                print(f"  ノートオン: {msg.note} ({frequency:.2f}Hz) vel={msg.velocity}")
-                
-            elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
-                # ノートオフ
-                if msg.note in active_notes:
-                    # サウンドを停止
-                    channel = active_notes[msg.note]['channel']
-                    if channel:
-                        channel.stop()
-                    del active_notes[msg.note]
-                    print(f"  ノートオフ: {msg.note}")
+                if self.show_progress:
+                    if msg.type == 'note_on' and msg.velocity > 0:
+                        frequency = self.midi_note_to_frequency(msg.note)
+                        print(f"  ノートオン: {msg.note} ({frequency:.2f}Hz) vel={msg.velocity}")
+                    elif msg.type == 'note_off' or (msg.type == 'note_on' and msg.velocity == 0):
+                        print(f"  ノートオフ: {msg.note}")
         
-        print("\n再生完了")
+        if self.show_progress:
+            print("\n再生完了")
         
     def parse_note(self, note_str: str) -> Tuple[float, int]:
         """
@@ -183,42 +243,6 @@ class ABCPlayer:
             multiplier = int(duration_str)
             return BASE_DURATION * multiplier
     
-    def generate_tone(self, frequency: float, duration: int) -> pygame.mixer.Sound:
-        """
-        指定された周波数と長さの音を生成
-        
-        Args:
-            frequency: 周波数(Hz)
-            duration: 長さ(ミリ秒)
-            
-        Returns:
-            pygame.mixer.Sound オブジェクト
-        """
-        import numpy as np
-        
-        # 休符の場合
-        if frequency == 0:
-            samples = np.zeros(int(duration * self.sample_rate / 1000))
-        else:
-            # 正弦波を生成
-            num_samples = int(duration * self.sample_rate / 1000)
-            sample_array = np.arange(num_samples)
-            waveform = np.sin(2 * np.pi * frequency * sample_array / self.sample_rate)
-            
-            # エンベロープを適用（フェードアウト）
-            envelope = np.ones(num_samples)
-            fade_length = min(int(num_samples * 0.1), 1000)
-            envelope[-fade_length:] = np.linspace(1, 0, fade_length)
-            
-            samples = (waveform * envelope * 32767).astype(np.int16)
-        
-        # ステレオに変換
-        stereo_samples = np.zeros((len(samples), 2), dtype=np.int16)
-        stereo_samples[:, 0] = samples
-        stereo_samples[:, 1] = samples
-        
-        return pygame.mixer.Sound(stereo_samples)
-    
     def frequency_to_midi_note(self, frequency: float) -> int:
         """
         周波数をMIDIノート番号に変換
@@ -249,9 +273,10 @@ class ABCPlayer:
             import mido
             from mido import Message, MidiFile, MidiTrack, MetaMessage
         except ImportError:
-            print("エラー: midoライブラリがインストールされていません")
-            print("インストール: pip install mido または uv add mido")
-            return
+            raise MIDIPortError(
+                "エラー: midoライブラリがインストールされていません\n"
+                "インストール: pip install mido python-rtmidi または uv add mido python-rtmidi"
+            )
         
         # 新しいMIDIファイルとトラックを作成
         mid = MidiFile()
@@ -265,8 +290,9 @@ class ABCPlayer:
         # スペースで分割して各音符を取得
         notes = abc_notation.split()
         
-        print(f"MIDI保存中: {output_path}")
-        print(f"テンポ: {tempo} BPM")
+        if self.show_progress:
+            print(f"MIDI保存中: {output_path}")
+            print(f"テンポ: {tempo} BPM")
         
         for note_str in notes:
             frequency, duration = self.parse_note(note_str)
@@ -287,50 +313,44 @@ class ABCPlayer:
                 # ノートオフ
                 track.append(Message('note_off', note=midi_note, velocity=velocity, time=ticks))
                 
-                print(f"  音符: {note_str} -> MIDI note {midi_note}, {duration}ms")
+                if self.show_progress:
+                    print(f"  音符: {note_str} -> MIDI note {midi_note}, {duration}ms")
             else:
                 # 休符 (単に時間を進める)
                 if len(track) > 0:
                     # 最後のメッセージの時間を延長
                     track[-1].time += ticks
-                print(f"  休符: {note_str} -> {duration}ms")
+                if self.show_progress:
+                    print(f"  休符: {note_str} -> {duration}ms")
         
         # ファイルに保存
         mid.save(output_path)
-        print(f"\nMIDIファイル保存完了: {output_path}")
+        if self.show_progress:
+            print(f"\nMIDIファイル保存完了: {output_path}")
     
     def play(self, abc_notation: str, save_midi: str = None):
         """
-        ABC記法の文字列を再生
+        ABC記法の文字列をMIDI出力ポート経由で再生
         
         Args:
             abc_notation: ABC記法の文字列(例: "C D E F G A B c")
             save_midi: MIDIファイルとして保存する場合のパス (省略可)
         """
+        import tempfile
+        
         # MIDI保存が指定されている場合
         if save_midi:
             self.save_to_midi(abc_notation, save_midi)
         
-        # スペースで分割して各音符を取得
-        notes = abc_notation.split()
+        # 一時的なMIDIファイルを作成して再生
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mid") as tmp:
+            temp_path = tmp.name
         
-        print(f"再生中: {abc_notation}")
-        
-        for note_str in notes:
-            frequency, duration = self.parse_note(note_str)
-            
-            if frequency > 0:
-                print(f"  音符: {note_str} -> {frequency:.2f}Hz, {duration}ms")
-            else:
-                print(f"  休符: {note_str} -> {duration}ms")
-            
-            sound = self.generate_tone(frequency, duration)
-            sound.play()
-            
-            # 音が終わるまで待機
-            pygame.time.wait(duration)
-        
-        print("再生完了")
+        try:
+            self.save_to_midi(abc_notation, temp_path)
+            self.play_midi(temp_path)
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
 
 
 def main():
@@ -401,6 +421,9 @@ def main():
             
     except KeyboardInterrupt:
         print("\n中断されました")
+    except MIDIPortError as e:
+        print(str(e))
+        sys.exit(1)
     except Exception as e:
         print(f"エラー: {e}")
         import traceback
