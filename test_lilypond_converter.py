@@ -13,7 +13,7 @@ def _extract_notes(track: mido.MidiTrack):
         current_time += msg.time
         if msg.type == "note_on" and msg.velocity > 0:
             on_times[msg.note] = current_time
-        elif msg.type in ("note_off",) or (msg.type == "note_on" and msg.velocity == 0):
+        elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
             start = on_times.pop(msg.note, None)
             if start is not None:
                 events.append((msg.note, current_time - start))

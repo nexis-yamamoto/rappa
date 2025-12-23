@@ -42,7 +42,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "lilypond_content": {
                         "type": "string",
-                        "description": "LilyPondのテキスト。例: \"\\\\relative c' { c4 d e f }\"",
+                        "description": "LilyPondのテキスト。例: \"\\relative c' { c4 d e f }\"",
                     },
                 },
                 "required": ["lilypond_content"],

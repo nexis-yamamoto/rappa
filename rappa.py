@@ -28,9 +28,7 @@ SEMITONE_RATIO = 2 ** (1/12)
 def looks_like_lilypond(text: str) -> bool:
     """LilyPondらしいテキストか簡易判定する。"""
     stripped = text.strip()
-    if stripped.startswith("\\"):
-        return True
-    markers = ["\\relative", "\\version", "\\score", "\\new", "\\tempo"]
+    markers = ["\\relative", "\\version", "\\score", "\\new", "\\tempo", "\\time", "\\key"]
     return any(marker in stripped for marker in markers)
 
 

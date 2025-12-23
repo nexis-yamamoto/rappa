@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
+from pathlib import Path
 import tempfile
 from typing import Optional
 
@@ -19,6 +20,8 @@ NOTE_OFFSETS = [0, 2, 4, 5, 7, 9, 11]
 
 def pitch_to_midi(pitch) -> int:
     """Convert ly.pitch.Pitch to MIDI note number."""
+    # pitch.alter is stored in quarter-step units (e.g., sharp = 0.5), so multiply
+    # by 2 to convert to semitone offsets and round to the nearest integer.
     semitone_from_alter = int(round(float(pitch.alter * 2)))
     base = 12 * (pitch.octave + 4)
     note_number = base + NOTE_OFFSETS[pitch.note] + semitone_from_alter
@@ -96,7 +99,7 @@ def lilypond_to_midifile(
     music_document = ly.music.document(document)
     music_node = _find_music_node(music_document)
     if music_node is None:
-        raise ValueError("LilyPond入力から音楽要素を取得できませんでした。")
+        raise ValueError("Could not find music content in the LilyPond input.")
 
     tempo_bpm = _extract_tempo(music_document, tempo_fallback)
     mid = MidiFile(ticks_per_beat=ticks_per_beat)
@@ -142,9 +145,16 @@ def convert_lilypond_to_midi_path(
         tempo_fallback=tempo_fallback,
         ticks_per_beat=ticks_per_beat,
     )
+    temp_path = None
     if output_path is None:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mid")
-        output_path = tmp.name
+        temp_path = tmp.name
+        output_path = temp_path
         tmp.close()
-    midi.save(output_path)
+    try:
+        midi.save(output_path)
+    except Exception:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
+        raise
     return output_path
