@@ -59,8 +59,12 @@ class ABCPlayer:
         Raises:
             MIDIPortError: MIDI出力ポートが利用できない場合
         """
+        # Check if cached port is still valid
         if self._port is not None:
-            return self._port
+            if not self._port.closed:
+                return self._port
+            # Port was closed, clear the cache
+            self._port = None
             
         try:
             import mido
@@ -71,8 +75,14 @@ class ABCPlayer:
                 "インストール: pip install mido python-rtmidi または uv add mido python-rtmidi"
             ) from e
         
-        # rtmidiバックエンドを設定
-        mido.set_backend('mido.backends.rtmidi')
+        # Only set backend if not already configured to rtmidi
+        try:
+            current_backend = mido.backend
+            if current_backend is None or 'rtmidi' not in current_backend.name:
+                mido.set_backend('mido.backends.rtmidi')
+        except Exception:
+            # If we can't check the backend, set it anyway
+            mido.set_backend('mido.backends.rtmidi')
         
         # 利用可能なMIDI出力ポートを取得
         try:
