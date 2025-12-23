@@ -35,12 +35,8 @@ DRUM_NAME_TO_MIDI: dict[str, int] = {
     "hho": 46,   # Open Hi-Hat
     "cymc": 49,  # Crash Cymbal 1
     "toml": 45,  # Low Tom
-    "tomml": 47, # Low-Mid Tom
     "tomm": 48,  # Hi-Mid Tom (mid tom)
-    "tommh": 48, # Hi-Mid Tom
     "tomh": 50,  # High Tom
-    "tomfh": 50, # High Floor Tom
-    "tomfl": 41, # Low Floor Tom
 }
 
 
