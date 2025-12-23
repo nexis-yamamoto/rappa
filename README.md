@@ -22,6 +22,15 @@ python rappa.py song.mid
 uv run rappa.py music.midi
 ```
 
+### LilyPond (.ly) を演奏
+
+```bash
+python rappa.py score.ly
+python rappa.py "\\relative c' { c4 d e f }"
+```
+
+> 初期実装のため音高・音価・テンポのみ対応（ダイナミクスやアーティキュレーションは無視されます）。
+
 ### ABC記法をMIDIファイルとして保存
 
 ```bash
@@ -53,7 +62,7 @@ cd rappa
 2. **uvを使う場合（推奨）**:
 ```bash
 # 依存関係をインストール
-uv add mcp pygame numpy mido
+uv add mcp pygame numpy mido python-ly
 
 # 動作確認
 uv run rappa_mcp_server.py
@@ -107,11 +116,15 @@ uv run rappa_mcp_server.py
    - 引数: `abc_notation` (文字列) - ABC記法の文字列
    - 例: `"C D E F G A B c"`
 
-2. **parse_abc_note** - ABC記法の音符を解析
+2. **play_lilypond** - LilyPondテキストをMIDIに変換して再生
+   - 引数: `lilypond_content` (文字列) - LilyPondのソース
+   - 例: `"\\relative c' { c4 d e f }"`
+
+3. **parse_abc_note** - ABC記法の音符を解析
    - 引数: `note` (文字列) - 解析する音符
    - 例: `"C2"`, `"D/2"`, `"z"`
 
-3. **get_note_frequencies** - 利用可能な音符と周波数の一覧を取得
+4. **get_note_frequencies** - 利用可能な音符と周波数の一覧を取得
 
 ### Claudeデスクトップアプリでの設定
 
@@ -150,7 +163,7 @@ uv run rappa_mcp_server.py
 
 ## MIDI機能について
 
-rappaは[mido](https://github.com/mido/mido)ライブラリを使ってMIDI再生・保存機能を提供します。
+rappaは[mido](https://github.com/mido/mido)ライブラリを使ってMIDI再生・保存機能を提供します。LilyPond入力も一度MIDIに変換してから同じシンセパイプラインで再生します。
 
 ### 主な機能
 

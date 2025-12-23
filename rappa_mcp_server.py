@@ -6,7 +6,9 @@ import asyncio
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
+from pathlib import Path
 from rappa import ABCPlayer
+from lilypond_converter import convert_lilypond_to_midi_path
 import json
 
 
@@ -30,6 +32,20 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["abc_notation"],
+            },
+        ),
+        Tool(
+            name="play_lilypond",
+            description="LilyPond (.ly) 形式の音楽をMIDIに変換して再生します。サポート範囲は音高と音価、テンポ（\\tempo）のみです。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "lilypond_content": {
+                        "type": "string",
+                        "description": "LilyPondのテキスト。例: \"\\\\relative c' { c4 d e f }\"",
+                    },
+                },
+                "required": ["lilypond_content"],
             },
         ),
         Tool(
@@ -87,6 +103,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = f"再生完了: {abc_notation}\n\n再生した音符:\n" + "\n".join(note_info)
             return [TextContent(type="text", text=result)]
             
+        except Exception as e:
+            return [TextContent(type="text", text=f"エラー: {str(e)}")]
+    
+    elif name == "play_lilypond":
+        lilypond_content = arguments.get("lilypond_content", "")
+        if not lilypond_content:
+            return [TextContent(type="text", text="エラー: LilyPondテキストが指定されていません")]
+        try:
+            midi_path = convert_lilypond_to_midi_path(lilypond_content)
+            player = ABCPlayer()
+            player.play_midi(midi_path)
+            Path(midi_path).unlink(missing_ok=True)
+            return [TextContent(type="text", text="LilyPondを再生しました")]
         except Exception as e:
             return [TextContent(type="text", text=f"エラー: {str(e)}")]
     

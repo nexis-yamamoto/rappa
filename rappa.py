@@ -8,6 +8,7 @@ import re
 import sys
 from typing import List, Tuple
 from pathlib import Path
+from lilypond_converter import convert_lilypond_to_midi_path
 
 # 音符の長さ（ミリ秒）
 BASE_DURATION = 500  # 四分音符の長さ
@@ -22,6 +23,15 @@ NOTE_FREQUENCIES = {
 
 # 半音の周波数比（12平均律）
 SEMITONE_RATIO = 2 ** (1/12)
+
+
+def looks_like_lilypond(text: str) -> bool:
+    """LilyPondらしいテキストか簡易判定する。"""
+    stripped = text.strip()
+    if stripped.startswith("\\"):
+        return True
+    markers = ["\\relative", "\\version", "\\score", "\\new", "\\tempo"]
+    return any(marker in stripped for marker in markers)
 
 
 class ABCPlayer:
@@ -367,12 +377,29 @@ def main():
         
         # 入力がファイルパスかどうかをチェック
         input_path = Path(input_str)
-        if input_path.exists() and input_path.suffix.lower() in ['.mid', '.midi']:
-            # MIDIファイルとして再生
-            player.play_midi(str(input_path))
+        if input_path.exists():
+            suffix = input_path.suffix.lower()
+            if suffix in ['.mid', '.midi']:
+                # MIDIファイルとして再生
+                player.play_midi(str(input_path))
+            elif suffix in ['.ly', '.lilypond']:
+                lily_text = input_path.read_text(encoding="utf-8")
+                midi_path = convert_lilypond_to_midi_path(lily_text, output_path=save_midi_path)
+                player.play_midi(str(midi_path))
+                if not save_midi_path:
+                    Path(midi_path).unlink(missing_ok=True)
+            else:
+                # ABC記法として再生（MIDI保存オプション付き）
+                player.play(input_str, save_midi=save_midi_path)
         else:
-            # ABC記法として再生（MIDI保存オプション付き）
-            player.play(input_str, save_midi=save_midi_path)
+            if looks_like_lilypond(input_str):
+                midi_path = convert_lilypond_to_midi_path(input_str, output_path=save_midi_path)
+                player.play_midi(str(midi_path))
+                if not save_midi_path:
+                    Path(midi_path).unlink(missing_ok=True)
+            else:
+                # ABC記法として再生（MIDI保存オプション付き）
+                player.play(input_str, save_midi=save_midi_path)
             
     except KeyboardInterrupt:
         print("\n中断されました")
