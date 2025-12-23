@@ -7,7 +7,7 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
 from pathlib import Path
-from rappa import ABCPlayer
+from rappa import ABCPlayer, MIDIPortError
 from lilypond_converter import convert_lilypond_to_midi_path
 import json
 
@@ -83,8 +83,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text="エラー: ABC記法の文字列が指定されていません")]
         
         try:
-            # 新しいイベントループで実行（pygameはメインスレッドで実行する必要がある）
-            player = ABCPlayer()
+            # MCPサーバーでは進行状況を表示しない
+            player = ABCPlayer(show_progress=False)
             
             # 再生情報を収集
             notes = abc_notation.split()
@@ -103,6 +103,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = f"再生完了: {abc_notation}\n\n再生した音符:\n" + "\n".join(note_info)
             return [TextContent(type="text", text=result)]
             
+        except MIDIPortError as e:
+            return [TextContent(type="text", text=str(e))]
         except Exception as e:
             return [TextContent(type="text", text=f"エラー: {str(e)}")]
     
@@ -112,10 +114,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text="エラー: LilyPondテキストが指定されていません")]
         try:
             midi_path = convert_lilypond_to_midi_path(lilypond_content)
-            player = ABCPlayer()
+            # MCPサーバーでは進行状況を表示しない
+            player = ABCPlayer(show_progress=False)
             player.play_midi(midi_path)
             Path(midi_path).unlink(missing_ok=True)
             return [TextContent(type="text", text="LilyPondを再生しました")]
+        except MIDIPortError as e:
+            return [TextContent(type="text", text=str(e))]
         except Exception as e:
             return [TextContent(type="text", text=f"エラー: {str(e)}")]
     
@@ -125,7 +130,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text="エラー: 音符が指定されていません")]
         
         try:
-            player = ABCPlayer()
+            # parse_note doesn't need MIDI port, so show_progress doesn't matter
+            player = ABCPlayer(show_progress=False)
             frequency, duration = player.parse_note(note)
             
             if frequency > 0:
