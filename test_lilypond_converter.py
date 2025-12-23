@@ -35,4 +35,4 @@ def test_lilypond_tempo_conversion():
     tempo_msgs = [m for m in mid.tracks[0] if m.type == "set_tempo"]
     assert tempo_msgs
     bpm = mido.tempo2bpm(tempo_msgs[0].tempo)
-    assert pytest.approx(90, rel=0.01) == bpm
+    assert bpm == pytest.approx(90, rel=0.01)

@@ -10,20 +10,27 @@ import ly.document
 import ly.music
 from ly.music import event as music_event
 from ly.music import items
-from ly.pitch import rel2abs
+from ly.pitch import Pitch, rel2abs
 import mido
 from mido import Message, MetaMessage, MidiFile, MidiTrack
 
 
 NOTE_OFFSETS = [0, 2, 4, 5, 7, 9, 11]
+SEMITONES_PER_OCTAVE = 12
+MIDI_C4_OCTAVE_OFFSET = 4  # octave=1 (c') should yield MIDI note 60
+QUARTER_STEPS_PER_SEMITONE = 2
+OFF_PRIORITY = 0
+ON_PRIORITY = 1
+EVENT_OFF = "off"
+EVENT_ON = "on"
 
 
-def pitch_to_midi(pitch) -> int:
+def pitch_to_midi(pitch: Pitch) -> int:
     """Convert ly.pitch.Pitch to MIDI note number."""
-    # pitch.alter is stored in quarter-step units (e.g., sharp = 0.5), so multiply
-    # by 2 to convert to semitone offsets and round to the nearest integer.
-    semitone_from_alter = int(round(float(pitch.alter * 2)))
-    base = 12 * (pitch.octave + 4)
+    # pitch.alter is stored in quarter-step units (e.g., sharp = 0.5 = two quarter steps),
+    # so multiply by 2 to convert to semitone offsets and round to the nearest integer.
+    semitone_from_alter = int(round(pitch.alter * QUARTER_STEPS_PER_SEMITONE))
+    base = SEMITONES_PER_OCTAVE * (pitch.octave + MIDI_C4_OCTAVE_OFFSET)
     note_number = base + NOTE_OFFSETS[pitch.note] + semitone_from_alter
     return max(0, min(127, note_number))
 
@@ -46,7 +53,7 @@ class LilypondEventCollector(music_event.Events):
         self.ticks_per_beat = ticks_per_beat
         self.events: list[TimedEvent] = []
 
-    def traverse(self, node, time, scaling):
+    def traverse(self, node: items.Item, time: Fraction | float, scaling: Fraction | float):
         if isinstance(node, items.Durable):
             tick_scale = _tick_scale(self.ticks_per_beat)
             start_ticks = int(round(time * tick_scale))
@@ -92,7 +99,7 @@ def lilypond_to_midifile(
     document = ly.document.Document(lilypond_text)
     try:
         rel2abs.rel2abs(ly.document.Cursor(document))
-    except Exception:
+    except (ValueError, RuntimeError):
         # Relative conversion failed; fall back to original pitches.
         pass
 
@@ -115,15 +122,15 @@ def lilypond_to_midifile(
     for event in collector.events:
         if event.note is None:
             continue
-        timeline.append((event.start, "on", event.note))
-        timeline.append((event.start + event.duration, "off", event.note))
+        timeline.append((event.start, EVENT_ON, event.note))
+        timeline.append((event.start + event.duration, EVENT_OFF, event.note))
 
-    timeline.sort(key=lambda e: (e[0], 0 if e[1] == "off" else 1))
+    timeline.sort(key=lambda e: (e[0], OFF_PRIORITY if e[1] == EVENT_OFF else ON_PRIORITY))
 
     last_tick = 0
     for tick, kind, note in timeline:
         delta = max(0, tick - last_tick)
-        if kind == "on":
+        if kind == EVENT_ON:
             track.append(Message("note_on", note=note, velocity=64, time=delta))
         else:
             track.append(Message("note_off", note=note, velocity=64, time=delta))

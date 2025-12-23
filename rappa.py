@@ -23,13 +23,13 @@ NOTE_FREQUENCIES = {
 
 # 半音の周波数比（12平均律）
 SEMITONE_RATIO = 2 ** (1/12)
+LILYPOND_MARKERS = ["\\relative", "\\version", "\\score", "\\new", "\\tempo", "\\time", "\\key"]
 
 
 def looks_like_lilypond(text: str) -> bool:
     """LilyPondらしいテキストか簡易判定する。"""
     stripped = text.strip()
-    markers = ["\\relative", "\\version", "\\score", "\\new", "\\tempo", "\\time", "\\key"]
-    return any(marker in stripped for marker in markers)
+    return any(marker in stripped for marker in LILYPOND_MARKERS)
 
 
 class ABCPlayer:
