@@ -645,6 +645,7 @@ source = { editable = "." }
 dependencies = [
     { name = "mcp" },
     { name = "mido" },
+    { name = "pytest" },
     { name = "python-ly" },
     { name = "python-rtmidi" },
 ]
@@ -658,6 +659,7 @@ dev = [
 requires-dist = [
     { name = "mcp", specifier = ">=0.9.0" },
     { name = "mido", specifier = ">=1.3.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "python-ly", specifier = ">=0.9.9" },
     { name = "python-rtmidi", specifier = ">=1.5.0" },
