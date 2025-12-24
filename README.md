@@ -39,6 +39,42 @@ python rappa.py "\\relative c' { c4 d e f }"
 
 > 初期実装のため音高・音価・テンポのみ対応（ダイナミクスやアーティキュレーションは無視されます）。
 
+#### LilyPond 打楽器パート（DrumStaff/drummode）対応
+
+LilyPondの`\drummode`および`\DrumStaff`による打楽器記譜をサポートしています。打楽器イベントはMIDIチャンネル10（General MIDI準拠のパーカッションチャンネル）に出力されます。
+
+**対応しているドラム名（LilyPond名 → GM打楽器）:**
+
+| LilyPond名 | GM打楽器 | MIDIノート番号 |
+|-----------|---------|--------------|
+| `bd` | Acoustic Bass Drum | 36 |
+| `sn` | Acoustic Snare | 38 |
+| `hh` | Closed Hi-Hat | 42 |
+| `hhc` | Closed Hi-Hat | 42 |
+| `hho` | Open Hi-Hat | 46 |
+| `cymc` | Crash Cymbal 1 | 49 |
+| `toml` | Low Tom | 45 |
+| `tomm` | Hi-Mid Tom | 48 |
+| `tomh` | High Tom | 50 |
+
+**使用例:**
+
+```bash
+# 単純なドラムパターン
+python rappa.py "\\drummode { bd4 hh sn hh bd hh sn hh }"
+
+# 同時打撃（コード記法）
+python rappa.py "\\drummode { <bd hh>4 <sn hho>4 }"
+
+# メロディとドラムの並行パート
+python rappa.py "<< \\new Staff { c'4 d' e' f' } \\new DrumStaff \\drummode { bd4 sn hh cymc } >>"
+```
+
+**制限事項:**
+- 上記リストに含まれないドラム名は警告を出力しスキップされます（エラーにはなりません）
+- ベロシティ/アクセントは現在固定値（64）です
+- ダイナミクスやロール等の装飾は無視されます
+
 ### ABC記法をMIDIファイルとして保存
 
 ```bash

@@ -5,6 +5,7 @@ from fractions import Fraction
 from pathlib import Path
 import tempfile
 from typing import Optional
+import warnings
 
 import ly.document
 import ly.music
@@ -23,6 +24,20 @@ OFF_PRIORITY = 0
 ON_PRIORITY = 1
 EVENT_OFF = "off"
 EVENT_ON = "on"
+DRUM_CHANNEL = 9  # MIDI channel 10 (0-indexed as 9) for percussion
+
+# General MIDI percussion mapping (drum name → GM note number)
+DRUM_NAME_TO_MIDI: dict[str, int] = {
+    "bd": 36,    # Acoustic Bass Drum
+    "sn": 38,    # Acoustic Snare
+    "hh": 42,    # Closed Hi-Hat
+    "hhc": 42,   # Closed Hi-Hat
+    "hho": 46,   # Open Hi-Hat
+    "cymc": 49,  # Crash Cymbal 1
+    "toml": 45,  # Low Tom
+    "tomm": 48,  # Hi-Mid Tom (mid tom)
+    "tomh": 50,  # High Tom
+}
 
 
 def pitch_to_midi(pitch: Pitch) -> int:
@@ -45,6 +60,22 @@ class TimedEvent:
     start: int
     duration: int
     note: Optional[int]
+    channel: int = 0  # Default channel 0, use DRUM_CHANNEL (9) for drums
+
+
+def _drum_name_to_midi(drum_name: str) -> Optional[int]:
+    """Convert a LilyPond drum name to a GM percussion MIDI note number.
+    
+    Returns None and emits a warning if the drum name is not mapped.
+    """
+    midi_note = DRUM_NAME_TO_MIDI.get(drum_name)
+    if midi_note is None:
+        warnings.warn(
+            f"Unmapped drum name '{drum_name}' - skipping this percussion event",
+            category=UserWarning,
+            stacklevel=2,
+        )
+    return midi_note
 
 
 class LilypondEventCollector(music_event.Events):
@@ -52,21 +83,65 @@ class LilypondEventCollector(music_event.Events):
         super().__init__()
         self.ticks_per_beat = ticks_per_beat
         self.events: list[TimedEvent] = []
+        self._in_drum_mode = False  # Track if we're inside a DrumMode context
 
     def traverse(self, node: items.Item, time: Fraction | float, scaling: Fraction | float):
-        if isinstance(node, items.Durable):
-            tick_scale = _tick_scale(self.ticks_per_beat)
+        # Track DrumMode context
+        was_in_drum_mode = self._in_drum_mode
+        if isinstance(node, items.DrumMode):
+            self._in_drum_mode = True
+
+        tick_scale = _tick_scale(self.ticks_per_beat)
+        
+        # Handle Chord elements containing DrumNotes
+        if isinstance(node, items.Chord) and self._in_drum_mode:
+            start_ticks = int(round(time * tick_scale))
+            duration_fraction = node.duration[0] * node.duration[1] * scaling
+            duration_ticks = max(1, int(round(duration_fraction * tick_scale)))
+            # Extract all DrumNotes from the chord
+            for child in node:
+                if isinstance(child, items.DrumNote):
+                    drum_name = str(child.token)
+                    midi_note = _drum_name_to_midi(drum_name)
+                    if midi_note is not None:
+                        self.events.append(TimedEvent(
+                            start=start_ticks,
+                            duration=duration_ticks,
+                            note=midi_note,
+                            channel=DRUM_CHANNEL,
+                        ))
+        elif isinstance(node, items.Durable):
             start_ticks = int(round(time * tick_scale))
             duration_fraction = node.duration[0] * node.duration[1] * scaling
             duration_ticks = max(1, int(round(duration_fraction * tick_scale)))
             midi_note = None
-            if isinstance(node, items.Note) and getattr(node, "pitch", None):
+            channel = 0
+            
+            if isinstance(node, items.DrumNote):
+                # Handle individual drum notes (not in a chord)
+                drum_name = str(node.token)
+                midi_note = _drum_name_to_midi(drum_name)
+                channel = DRUM_CHANNEL
+            elif isinstance(node, items.Note) and getattr(node, "pitch", None):
                 midi_note = pitch_to_midi(node.pitch)
+            
             if isinstance(
                 node, (items.Note, items.Rest, items.Skip, items.Q, items.DrumNote, items.Unpitched)
             ):
-                self.events.append(TimedEvent(start=start_ticks, duration=duration_ticks, note=midi_note))
-        return super().traverse(node, time, scaling)
+                self.events.append(TimedEvent(
+                    start=start_ticks,
+                    duration=duration_ticks,
+                    note=midi_note,
+                    channel=channel,
+                ))
+        
+        result = super().traverse(node, time, scaling)
+        
+        # Restore DrumMode context after leaving
+        if isinstance(node, items.DrumMode):
+            self._in_drum_mode = was_in_drum_mode
+        
+        return result
 
 
 def _find_music_node(root: items.Item) -> Optional[items.Music]:
@@ -118,22 +193,23 @@ def lilypond_to_midifile(
     collector = LilypondEventCollector(ticks_per_beat)
     collector.read(music_node)
 
-    timeline: list[tuple[int, str, int]] = []
+    # Timeline: (tick, event_type, note, channel)
+    timeline: list[tuple[int, str, int, int]] = []
     for event in collector.events:
         if event.note is None:
             continue
-        timeline.append((event.start, EVENT_ON, event.note))
-        timeline.append((event.start + event.duration, EVENT_OFF, event.note))
+        timeline.append((event.start, EVENT_ON, event.note, event.channel))
+        timeline.append((event.start + event.duration, EVENT_OFF, event.note, event.channel))
 
     timeline.sort(key=lambda e: (e[0], OFF_PRIORITY if e[1] == EVENT_OFF else ON_PRIORITY))
 
     last_tick = 0
-    for tick, kind, note in timeline:
+    for tick, kind, note, channel in timeline:
         delta = max(0, tick - last_tick)
         if kind == EVENT_ON:
-            track.append(Message("note_on", note=note, velocity=64, time=delta))
+            track.append(Message("note_on", note=note, velocity=64, time=delta, channel=channel))
         else:
-            track.append(Message("note_off", note=note, velocity=64, time=delta))
+            track.append(Message("note_off", note=note, velocity=64, time=delta, channel=channel))
         last_tick = tick
 
     track.append(MetaMessage("end_of_track", time=0))
