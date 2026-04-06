@@ -22,7 +22,17 @@ NOTE_FREQUENCIES = {
 
 # 半音の周波数比（12平均律）
 SEMITONE_RATIO = 2 ** (1/12)
-LILYPOND_MARKERS = ["\\relative", "\\version", "\\score", "\\new", "\\tempo", "\\time", "\\key"]
+LILYPOND_MARKERS = [
+    "\\relative",
+    "\\version",
+    "\\score",
+    "\\new",
+    "\\tempo",
+    "\\time",
+    "\\key",
+    "\\drummode",
+    "\\DrumStaff",
+]
 
 
 class MIDIPortError(Exception):
@@ -33,7 +43,9 @@ class MIDIPortError(Exception):
 def looks_like_lilypond(text: str) -> bool:
     """LilyPondらしいテキストか簡易判定する。"""
     stripped = text.strip()
-    return any(marker in stripped for marker in LILYPOND_MARKERS)
+    if any(marker in stripped for marker in LILYPOND_MARKERS):
+        return True
+    return bool(re.search(r'\\[A-Za-z]+', stripped))
 
 
 class ABCPlayer:

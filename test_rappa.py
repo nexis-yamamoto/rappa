@@ -2,7 +2,7 @@ import os
 import tempfile
 import pytest
 
-from rappa import ABCPlayer, MIDIPortError, NOTE_FREQUENCIES
+from rappa import ABCPlayer, MIDIPortError, NOTE_FREQUENCIES, looks_like_lilypond
 
 
 def test_parse_note_basic():
@@ -103,6 +103,18 @@ def test_save_to_midi():
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
+
+
+def test_looks_like_lilypond_for_drummode_input():
+    assert looks_like_lilypond(r"\drummode { bd4 hh sn hh }") is True
+
+
+def test_looks_like_lilypond_for_drumstaff_input():
+    assert looks_like_lilypond(r"<< \new DrumStaff \drummode { bd4 sn } >>") is True
+
+
+def test_looks_like_lilypond_does_not_match_abc_input():
+    assert looks_like_lilypond("C D E F G A B c") is False
 
 
 def test_midi_port_error_on_play():

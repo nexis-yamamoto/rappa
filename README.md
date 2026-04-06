@@ -61,13 +61,13 @@ LilyPondの`\drummode`および`\DrumStaff`による打楽器記譜をサポー�
 
 ```bash
 # 単純なドラムパターン
-python rappa.py "\\drummode { bd4 hh sn hh bd hh sn hh }"
+python rappa.py "\drummode { bd4 hh sn hh bd hh sn hh }"
 
 # 同時打撃（コード記法）
-python rappa.py "\\drummode { <bd hh>4 <sn hho>4 }"
+python rappa.py "\drummode { <bd hh>4 <sn hho>4 }"
 
 # メロディとドラムの並行パート
-python rappa.py "<< \\new Staff { c'4 d' e' f' } \\new DrumStaff \\drummode { bd4 sn hh cymc } >>"
+python rappa.py "<< \new Staff { c'4 d' e' f' } \new DrumStaff \drummode { bd4 sn hh cymc } >>"
 ```
 
 **制限事項:**
